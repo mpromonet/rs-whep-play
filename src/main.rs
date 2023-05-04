@@ -90,9 +90,7 @@ async fn main() -> Result<()> {
     let peer_connection = Arc::new(api.new_peer_connection(config).await?);
 
     // Allow us to receive 1 video track
-    peer_connection
-        .add_transceiver_from_kind(RTPCodecType::Video, None)
-        .await?;
+    peer_connection.add_transceiver_from_kind(RTPCodecType::Video, None).await?;
 
     let notify_tx = Arc::new(Notify::new());
     let notify_rx = notify_tx.clone();
@@ -120,13 +118,8 @@ async fn main() -> Result<()> {
         move |connection_state: RTCIceConnectionState| {
             println!("Connection State has changed {connection_state}");
 
-            if connection_state == RTCIceConnectionState::Connected {
-                println!("Ctrl+C the remote client to stop the demo");
-            } else if connection_state == RTCIceConnectionState::Failed {
+            if connection_state == RTCIceConnectionState::Failed {
                 notify_tx.notify_waiters();
-
-                println!("Done writing media files");
-
                 let _ = done_tx.try_send(());
             }
             Box::pin(async {})
@@ -137,23 +130,23 @@ async fn main() -> Result<()> {
     let offer = peer_connection.create_offer(None).await?;
     let offer_str = serde_json::to_string(&offer.sdp)?;
 
-    // Set the remote SessionDescription
+    // Set local SessionDescription
     peer_connection.set_local_description(offer).await?;
 
-    // Create channel that is blocked until ICE Gathering is complete
+    // Wait ICE Gathering is complete
     let mut gather_complete = peer_connection.gathering_complete_promise().await;
     let _ = gather_complete.recv().await;
 
     // WHEP call
     println!("Offer:{offer_str}");
-
     let client = reqwest::Client::new();
     let response = client.post(url).body(offer_str).send().await?;
     let answer_str = response.text().await?;
     println!("Answer:{answer_str}");
-
     let desc = json!({ "type": "answer", "sdp": answer_str }).to_string();
     let answer = serde_json::from_str::<RTCSessionDescription>(&desc)?;
+
+    // Set remote SessionDescription
     peer_connection.set_remote_description(answer).await?;
 
     println!("Press ctrl-c to stop");
