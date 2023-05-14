@@ -10,10 +10,10 @@
 use anyhow::Result;
 use serde_json::json;
 use std::{env, sync::Arc};
-use tokio::sync::Notify;
 use webrtc::util::Marshal;
 
 use gstreamer::prelude::*;
+use log::{info, trace};
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264};
 use webrtc::api::APIBuilder;
 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
@@ -24,13 +24,8 @@ use webrtc::rtp_transceiver::rtp_codec::{
     RTCRtpCodecCapability, RTCRtpCodecParameters, RTPCodecType,
 };
 use webrtc::track::track_remote::TrackRemote;
-use log::{info,trace};
 
-async fn handle_data(
-    appsrc: &gstreamer_app::AppSrc,
-    track: Arc<TrackRemote>,
-    notify: Arc<Notify>,
-) -> Result<()> {
+async fn handle_data(appsrc: &gstreamer_app::AppSrc, track: Arc<TrackRemote>) -> Result<()> {
     loop {
         tokio::select! {
             result = track.read_rtp() => {
@@ -44,10 +39,6 @@ async fn handle_data(
                     return Ok(());
                 }
             }
-            _ = notify.notified() => {
-                info!("notified");
-                return Ok(());
-            }
         }
     }
 }
@@ -59,6 +50,36 @@ async fn whep(url: &str, offer_str: String) -> Result<String> {
     let answer_str = response.text().await?;
     info!("Answer:{answer_str}");
     Ok(answer_str)
+}
+
+fn create_h264_consumer(payload_type: u8) -> Result<gstreamer_app::AppSrc> {
+    let pipeline = gstreamer::Pipeline::new(None);
+    let src = gstreamer::ElementFactory::make("appsrc").build()?;
+    let rtp = gstreamer::ElementFactory::make("rtph264depay").build()?;
+    let decode = gstreamer::ElementFactory::make("avdec_h264").build()?;
+    let videoconvert = gstreamer::ElementFactory::make("videoconvert").build()?;
+    let sink = gstreamer::ElementFactory::make("autovideosink").build()?;
+
+    pipeline
+        .add_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
+    gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
+    let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
+    appsrc.set_caps(Some(
+        &gstreamer::Caps::builder("application/x-rtp")
+            .field("media", "video")
+            .field("encoding-name", "H264")
+            .field("payload", payload_type)
+            .field("clock-rate", 90000)
+            .build(),
+    ));
+    appsrc.set_format(gstreamer::Format::Time);
+
+    info!("appsrc {:?}", appsrc);
+
+    // start pipeline
+    let _ = pipeline.set_state(gstreamer::State::Playing);
+
+    Ok(appsrc)
 }
 
 #[tokio::main]
@@ -119,55 +140,18 @@ async fn main() -> Result<()> {
         .add_transceiver_from_kind(RTPCodecType::Video, None)
         .await?;
 
-    let notify_tx = Arc::new(Notify::new());
-    let notify_rx = notify_tx.clone();
-
     // Set a handler for when a new remote track starts
     peer_connection.on_track(Box::new(move |track, _, _| {
-        let notify_rx2 = Arc::clone(&notify_rx);
-
         Box::pin(async move {
             let codec = track.codec();
             let mime_type = codec.capability.mime_type.to_lowercase();
             if mime_type == MIME_TYPE_H264.to_lowercase() {
                 info!("Got h264 track, receiving data");
 
-                let pipeline = gstreamer::Pipeline::new(None);
-                let src = gstreamer::ElementFactory::make("appsrc").build().unwrap();
-                let rtp = gstreamer::ElementFactory::make("rtph264depay")
-                    .build()
-                    .unwrap();
-                let decode = gstreamer::ElementFactory::make("avdec_h264")
-                    .build()
-                    .unwrap();
-                let videoconvert = gstreamer::ElementFactory::make("videoconvert")
-                    .build()
-                    .unwrap();
-                let sink = gstreamer::ElementFactory::make("autovideosink")
-                    .build()
-                    .unwrap();
-
-                pipeline
-                    .add_many(&[&src, &rtp, &decode, &videoconvert, &sink])
-                    .unwrap();
-                gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink])
-                    .unwrap();
-                let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
-                appsrc.set_caps(Some(
-                    &gstreamer::Caps::builder("application/x-rtp")
-                        .field("media", "video")
-                        .field("encoding-name", "H264")
-                        .field("payload", payload_type)
-                        .field("clock-rate", 90000)
-                        .build(),
-                ));
-                appsrc.set_format(gstreamer::Format::Time);
-
-                info!("appsrc {:?}", appsrc);
-                let _ = pipeline.set_state(gstreamer::State::Playing);
+                let appsrc = create_h264_consumer(payload_type).unwrap();
 
                 tokio::spawn(async move {
-                    let _ = handle_data(&appsrc, track, notify_rx2).await;
+                    let _ = handle_data(&appsrc, track).await;
                 });
             }
         })
@@ -182,7 +166,6 @@ async fn main() -> Result<()> {
             info!("Connection State has changed {connection_state}");
 
             if connection_state == RTCIceConnectionState::Failed {
-                notify_tx.notify_waiters();
                 let _ = done_tx.try_send(());
             }
             Box::pin(async {})
