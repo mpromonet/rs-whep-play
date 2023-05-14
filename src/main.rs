@@ -109,6 +109,15 @@ async fn main() -> Result<()> {
                 pipeline.add_many(&[&src, &rtp, &decode, &videoconvert, &sink]).unwrap();
                 gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink]).unwrap();            
                 let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
+                appsrc.set_caps(Some(
+                    &gstreamer::Caps::builder("application/x-rtp")
+                        .field("media", "video")
+                        .field("encoding-name", "H264")
+                        .field("payload", 102i32)
+                        .field("clock-rate", 90000i32)
+                        .build()));
+                appsrc.set_format(gstreamer::Format::Time);
+
                 println!("appsrc {:?}", appsrc);
                 let _ = pipeline.set_state(gstreamer::State::Playing);
 
