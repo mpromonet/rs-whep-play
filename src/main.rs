@@ -1,25 +1,27 @@
 use anyhow::Result;
 use serde_json::json;
-use std::env;
-use std::sync::Arc;
+use webrtc::util::Marshal;
+use std::{env, sync::Arc};
 use tokio::sync::Notify;
-use webrtc::api::interceptor_registry::register_default_interceptors;
+
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264};
 use webrtc::api::APIBuilder;
 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
-use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTCRtpCodecParameters, RTPCodecType};
 use webrtc::track::track_remote::TrackRemote;
+use gstreamer::prelude::*;
 
-async fn handle_data(track: Arc<TrackRemote>, notify: Arc<Notify>) -> Result<()> {
+async fn handle_data(appsrc: &gstreamer_app::AppSrc, track: Arc<TrackRemote>, notify: Arc<Notify>) -> Result<()> {
     loop {
         tokio::select! {
             result = track.read_rtp() => {
                 if let Ok((rtp_packet, _)) = result {
-                    println!("{rtp_packet}");
+                    let buf = rtp_packet.marshal()?;
+                    let buffer = gstreamer::Buffer::from_slice(buf);
+                    let _ = appsrc.push_buffer(buffer);
                 }else{
                     println!("read_rtp error");
                     return Ok(());
@@ -42,11 +44,13 @@ async fn main() -> Result<()> {
         url = &args[1];
     }
 
+    // gstreamer pipeline    
+    gstreamer::init()?;
+
     // Create a MediaEngine object to configure the supported codec
     let mut m = MediaEngine::default();
 
     // Setup the codecs you want to use.
-    // We'll use a H264 and Opus but you can also define your own
     m.register_codec(
         RTCRtpCodecParameters {
             capability: RTCRtpCodecCapability {
@@ -62,19 +66,9 @@ async fn main() -> Result<()> {
         RTPCodecType::Video,
     )?;
 
-    // Create a InterceptorRegistry. This is the user configurable RTP/RTCP Pipeline.
-    // This provides NACKs, RTCP Reports and other features. If you use `webrtc.NewPeerConnection`
-    // this is enabled by default. If you are manually managing You MUST create a InterceptorRegistry
-    // for each PeerConnection.
-    let mut registry = Registry::new();
-
-    // Use the default set of Interceptors
-    registry = register_default_interceptors(registry, &mut m)?;
-
     // Create the API object with the MediaEngine
     let api = APIBuilder::new()
         .with_media_engine(m)
-        .with_interceptor_registry(registry)
         .build();
 
     // Prepare the configuration
@@ -98,13 +92,28 @@ async fn main() -> Result<()> {
     // Set a handler for when a new remote track starts
     peer_connection.on_track(Box::new(move |track, _, _| {
         let notify_rx2 = Arc::clone(&notify_rx);
+
         Box::pin(async move {
             let codec = track.codec();
             let mime_type = codec.capability.mime_type.to_lowercase();
             if mime_type == MIME_TYPE_H264.to_lowercase() {
                 println!("Got h264 track, receiving data");
+
+                let pipeline = gstreamer::Pipeline::new(None);
+                let src = gstreamer::ElementFactory::make("appsrc").build().unwrap();
+                let rtp = gstreamer::ElementFactory::make("rtph264depay").build().unwrap();
+                let decode = gstreamer::ElementFactory::make("avdec_h264").build().unwrap();
+                let videoconvert = gstreamer::ElementFactory::make("videoconvert").build().unwrap();
+                let sink = gstreamer::ElementFactory::make("autovideosink").build().unwrap();
+            
+                pipeline.add_many(&[&src, &rtp, &decode, &videoconvert, &sink]).unwrap();
+                gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink]).unwrap();            
+                let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
+                println!("appsrc {:?}", appsrc);
+                let _ = pipeline.set_state(gstreamer::State::Playing);
+
                 tokio::spawn(async move {
-                    let _ = handle_data(track, notify_rx2).await;
+                    let _ = handle_data(&appsrc, track, notify_rx2).await;
                 });
             }
         })
