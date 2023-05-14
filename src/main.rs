@@ -24,6 +24,7 @@ use webrtc::rtp_transceiver::rtp_codec::{
     RTCRtpCodecCapability, RTCRtpCodecParameters, RTPCodecType,
 };
 use webrtc::track::track_remote::TrackRemote;
+use log::{info,trace};
 
 async fn handle_data(
     appsrc: &gstreamer_app::AppSrc,
@@ -34,16 +35,17 @@ async fn handle_data(
         tokio::select! {
             result = track.read_rtp() => {
                 if let Ok((rtp_packet, _)) = result {
+                    trace!("rtp:{rtp_packet}");
                     let buf = rtp_packet.marshal()?;
                     let buffer = gstreamer::Buffer::from_slice(buf);
                     let _ = appsrc.push_buffer(buffer);
                 }else{
-                    println!("read_rtp error");
+                    info!("read_rtp error");
                     return Ok(());
                 }
             }
             _ = notify.notified() => {
-                println!("notified");
+                info!("notified");
                 return Ok(());
             }
         }
@@ -51,11 +53,11 @@ async fn handle_data(
 }
 
 async fn whep(url: &str, offer_str: String) -> Result<String> {
-    println!("Offer:{offer_str}");
+    info!("Offer:{offer_str}");
     let client = reqwest::Client::new();
     let response = client.post(url).body(offer_str).send().await?;
     let answer_str = response.text().await?;
-    println!("Answer:{answer_str}");
+    info!("Answer:{answer_str}");
     Ok(answer_str)
 }
 
@@ -71,6 +73,9 @@ async fn main() -> Result<()> {
     if args.len() > 2 {
         payload_type = args[2].parse::<u8>().unwrap();
     }
+
+    // init logger
+    env_logger::init();
 
     // gstreamer pipeline
     gstreamer::init()?;
@@ -125,7 +130,7 @@ async fn main() -> Result<()> {
             let codec = track.codec();
             let mime_type = codec.capability.mime_type.to_lowercase();
             if mime_type == MIME_TYPE_H264.to_lowercase() {
-                println!("Got h264 track, receiving data");
+                info!("Got h264 track, receiving data");
 
                 let pipeline = gstreamer::Pipeline::new(None);
                 let src = gstreamer::ElementFactory::make("appsrc").build().unwrap();
@@ -158,7 +163,7 @@ async fn main() -> Result<()> {
                 ));
                 appsrc.set_format(gstreamer::Format::Time);
 
-                println!("appsrc {:?}", appsrc);
+                info!("appsrc {:?}", appsrc);
                 let _ = pipeline.set_state(gstreamer::State::Playing);
 
                 tokio::spawn(async move {
@@ -174,7 +179,7 @@ async fn main() -> Result<()> {
     // This will notify you when the peer has connected/disconnected
     peer_connection.on_ice_connection_state_change(Box::new(
         move |connection_state: RTCIceConnectionState| {
-            println!("Connection State has changed {connection_state}");
+            info!("Connection State has changed {connection_state}");
 
             if connection_state == RTCIceConnectionState::Failed {
                 notify_tx.notify_waiters();
@@ -203,10 +208,9 @@ async fn main() -> Result<()> {
     // Set remote SessionDescription
     peer_connection.set_remote_description(answer).await?;
 
-    println!("Press ctrl-c to stop");
     tokio::select! {
         _ = done_rx.recv() => {
-            println!("received done signal!");
+            info!("received done signal!");
         }
         _ = tokio::signal::ctrl_c() => {
             println!();
