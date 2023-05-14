@@ -44,13 +44,26 @@ async fn handle_data(appsrc: &gstreamer_app::AppSrc, track: Arc<TrackRemote>, no
     }
 }
 
+async fn whep(url: &str, offer_str: String) -> Result<String> {
+    println!("Offer:{offer_str}");
+    let client = reqwest::Client::new();
+    let response = client.post(url).body(offer_str).send().await?;
+    let answer_str = response.text().await?;
+    println!("Answer:{answer_str}");
+    Ok(answer_str)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut url =
         "http://localhost:8000/api/whep?url=Zeeland&options=rtptransport%3dtcp%26timeout%3d60";
+    let mut payload_type = 102u8;
     let args: Vec<String> = env::args().collect();
     if args.len() > 1 {
         url = &args[1];
+    }
+    if args.len() > 2 {
+        payload_type = args[2].parse::<u8>().unwrap();
     }
 
     // gstreamer pipeline    
@@ -69,7 +82,7 @@ async fn main() -> Result<()> {
                 sdp_fmtp_line: "".to_owned(),
                 rtcp_feedback: vec![],
             },
-            payload_type: 102,
+            payload_type: payload_type,
             ..Default::default()
         },
         RTPCodecType::Video,
@@ -122,8 +135,8 @@ async fn main() -> Result<()> {
                     &gstreamer::Caps::builder("application/x-rtp")
                         .field("media", "video")
                         .field("encoding-name", "H264")
-                        .field("payload", 102i32)
-                        .field("clock-rate", 90000i32)
+                        .field("payload", payload_type)
+                        .field("clock-rate", 90000)
                         .build()));
                 appsrc.set_format(gstreamer::Format::Time);
 
@@ -165,11 +178,7 @@ async fn main() -> Result<()> {
     let _ = gather_complete.recv().await;
 
     // WHEP call
-    println!("Offer:{offer_str}");
-    let client = reqwest::Client::new();
-    let response = client.post(url).body(offer_str).send().await?;
-    let answer_str = response.text().await?;
-    println!("Answer:{answer_str}");
+    let answer_str = whep(url, offer_str).await?;
     let desc = json!({ "type": "answer", "sdp": answer_str }).to_string();
     let answer = serde_json::from_str::<RTCSessionDescription>(&desc)?;
 
