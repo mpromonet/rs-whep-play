@@ -1,4 +1,4 @@
-linux_builder:
+linux_docker_builder:
   script: |
     export TAG=${CIRRUS_TAG:-latest}
     docker build -t $CIRRUS_REPO_FULL_NAME:${TAG} . 
