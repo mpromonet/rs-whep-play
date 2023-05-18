@@ -14,7 +14,7 @@ use webrtc::util::Marshal;
 
 use gstreamer::prelude::*;
 use log::{info, trace};
-use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264};
+use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264, MIME_TYPE_VP8};
 use webrtc::api::APIBuilder;
 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -82,6 +82,36 @@ fn create_h264_consumer(payload_type: u8) -> Result<gstreamer_app::AppSrc> {
     Ok(appsrc)
 }
 
+fn create_vp8_consumer(payload_type: u8) -> Result<gstreamer_app::AppSrc> {
+    let pipeline = gstreamer::Pipeline::new(None);
+    let src = gstreamer::ElementFactory::make("appsrc").build()?;
+    let rtp = gstreamer::ElementFactory::make("rtpvp8depay").build()?;
+    let decode = gstreamer::ElementFactory::make("avdec_vp8").build()?;
+    let videoconvert = gstreamer::ElementFactory::make("videoconvert").build()?;
+    let sink = gstreamer::ElementFactory::make("autovideosink").build()?;
+
+    pipeline
+        .add_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
+    gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
+    let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
+    appsrc.set_caps(Some(
+        &gstreamer::Caps::builder("application/x-rtp")
+            .field("media", "video")
+            .field("encoding-name", "VP8")
+            .field("payload", payload_type)
+            .field("clock-rate", 90000)
+            .build(),
+    ));
+    appsrc.set_format(gstreamer::Format::Time);
+
+    info!("appsrc {:?}", appsrc);
+
+    // start pipeline
+    let _ = pipeline.set_state(gstreamer::State::Playing);
+
+    Ok(appsrc)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut url =
@@ -108,7 +138,7 @@ async fn main() -> Result<()> {
     m.register_codec(
         RTCRtpCodecParameters {
             capability: RTCRtpCodecCapability {
-                mime_type: MIME_TYPE_H264.to_owned(),
+                mime_type: MIME_TYPE_VP8.to_owned(),
                 clock_rate: 90000,
                 channels: 0,
                 sdp_fmtp_line: "".to_owned(),
@@ -119,7 +149,21 @@ async fn main() -> Result<()> {
         },
         RTPCodecType::Video,
     )?;
-
+    m.register_codec(
+        RTCRtpCodecParameters {
+            capability: RTCRtpCodecCapability {
+                mime_type: MIME_TYPE_H264.to_owned(),
+                clock_rate: 90000,
+                channels: 0,
+                sdp_fmtp_line: "".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            payload_type: payload_type+1,
+            ..Default::default()
+        },
+        RTPCodecType::Video,
+    )?;
+    
     // Create the API object with the MediaEngine
     let api = APIBuilder::new().with_media_engine(m).build();
 
@@ -144,11 +188,20 @@ async fn main() -> Result<()> {
     peer_connection.on_track(Box::new(move |track, _, _| {
         Box::pin(async move {
             let codec = track.codec();
+            info!("codec:{}", codec.capability.mime_type);
             let mime_type = codec.capability.mime_type.to_lowercase();
             if mime_type == MIME_TYPE_H264.to_lowercase() {
                 info!("Got h264 track, receiving data");
 
                 let appsrc = create_h264_consumer(payload_type).unwrap();
+
+                tokio::spawn(async move {
+                    let _ = handle_data(&appsrc, track).await;
+                });
+            } else if mime_type == MIME_TYPE_VP8.to_lowercase() {
+                info!("Got VP8 track, receiving data");
+
+                let appsrc = create_vp8_consumer(payload_type).unwrap();
 
                 tokio::spawn(async move {
                     let _ = handle_data(&appsrc, track).await;
