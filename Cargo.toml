@@ -2,6 +2,9 @@
 name = "rs-whep-play"
 version = "0.1.0"
 edition = "2021"
+authors = ["Michel Promonet <michel.promonet@free.fr>"]
+license = "The Unlicense"
+keywords = ["webrtc", "whep", "gstreamer"]
 
 [dependencies]
 webrtc = "0.7.2"
