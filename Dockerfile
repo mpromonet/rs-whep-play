@@ -1,4 +1,4 @@
-FROM rust as build
+FROM rust as builder
 LABEL maintainer=michel.promonet@free.fr
 
 RUN USER=root cargo new --bin rs-whep-play
@@ -23,6 +23,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
       gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
       gstreamer1.0-libav
 
-COPY --from=build /workdir/target/release/rs-whep-play .
+COPY --from=builder /workdir/target/release/rs-whep-play .
 
 CMD ["./rs-whep-play"]
