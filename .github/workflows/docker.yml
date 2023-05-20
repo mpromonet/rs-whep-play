@@ -28,11 +28,11 @@ jobs:
         target: builder
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        tags: ghcr.io/${{ github.actor }}/${{ github.event.repository.name }}:dev 
+        tags: ghcr.io/${{ github.repository }}:dev 
 
     - name: Build and push
       uses: docker/build-push-action@v4
       with:
         context: .
         push: true
-        tags: ghcr.io/${{ github.actor }}/${{ github.event.repository.name }}:latest 
+        tags: ghcr.io/${{ github.repository }}:latest 
