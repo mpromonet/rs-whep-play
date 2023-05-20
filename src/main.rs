@@ -10,6 +10,7 @@
 use anyhow::Result;
 use serde_json::json;
 use std::{env, sync::Arc};
+use env_logger::Env;
 use webrtc::util::Marshal;
 
 use gstreamer::prelude::*;
@@ -52,7 +53,11 @@ async fn whep(url: &str, offer_str: String) -> Result<String> {
     Ok(answer_str)
 }
 
-fn create_appsrc_consumer(payload_type: u8 , appsrc: gstreamer_app::AppSrc, codec: &str) -> Result<gstreamer_app::AppSrc> {
+fn create_appsrc_consumer(
+    payload_type: u8,
+    appsrc: gstreamer_app::AppSrc,
+    codec: &str,
+) -> Result<gstreamer_app::AppSrc> {
     appsrc.set_caps(Some(
         &gstreamer::Caps::builder("application/x-rtp")
             .field("media", "video")
@@ -76,8 +81,7 @@ fn create_h264_consumer(payload_type: u8) -> Result<gstreamer_app::AppSrc> {
     let videoconvert = gstreamer::ElementFactory::make("videoconvert").build()?;
     let sink = gstreamer::ElementFactory::make("autovideosink").build()?;
 
-    pipeline
-        .add_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
+    pipeline.add_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
     gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
 
     let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
@@ -97,8 +101,7 @@ fn create_vp8_consumer(payload_type: u8) -> Result<gstreamer_app::AppSrc> {
     let videoconvert = gstreamer::ElementFactory::make("videoconvert").build()?;
     let sink = gstreamer::ElementFactory::make("autovideosink").build()?;
 
-    pipeline
-        .add_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
+    pipeline.add_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
     gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
 
     let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
@@ -124,7 +127,7 @@ async fn main() -> Result<()> {
     }
 
     // init logger
-    env_logger::init();
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
     // gstreamer pipeline
     gstreamer::init()?;
@@ -146,34 +149,36 @@ async fn main() -> Result<()> {
     // Create a new RTCPeerConnection
     let peer_connection = Arc::new(api.new_peer_connection(config).await?);
 
-    // Allow us to receive 1 video track
+    // Add transceiver
     let tr = peer_connection
         .add_transceiver_from_kind(RTPCodecType::Video, None)
         .await?;
 
-    tr.set_codec_preferences(vec![RTCRtpCodecParameters{
-        payload_type, 
-        capability: RTCRtpCodecCapability{
-            mime_type: MIME_TYPE_H264.to_string(),
-            clock_rate: 90000,
-            channels: 0,
-            sdp_fmtp_line: "".to_owned(),
-            rtcp_feedback: vec![]
+    tr.set_codec_preferences(vec![
+        RTCRtpCodecParameters {
+            payload_type,
+            capability: RTCRtpCodecCapability {
+                mime_type: MIME_TYPE_H264.to_string(),
+                clock_rate: 90000,
+                channels: 0,
+                sdp_fmtp_line: "".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            ..Default::default()
         },
-        ..Default::default()
-    },
-    RTCRtpCodecParameters{
-        payload_type: payload_type+1, 
-        capability: RTCRtpCodecCapability{
-            mime_type: MIME_TYPE_VP8.to_string(),
-            clock_rate: 90000,
-            channels: 0,
-            sdp_fmtp_line: "".to_owned(),
-            rtcp_feedback: vec![]
+        RTCRtpCodecParameters {
+            payload_type: payload_type + 1,
+            capability: RTCRtpCodecCapability {
+                mime_type: MIME_TYPE_VP8.to_string(),
+                clock_rate: 90000,
+                channels: 0,
+                sdp_fmtp_line: "".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            ..Default::default()
         },
-        ..Default::default()
-    }
-    ]).await?;
+    ])
+    .await?;
 
     // Set a handler for when a new remote track starts
     peer_connection.on_track(Box::new(move |track, _, _| {
