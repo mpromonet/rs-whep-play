@@ -8,9 +8,9 @@
 ** -------------------------------------------------------------------------*/
 
 use anyhow::Result;
+use env_logger::Env;
 use serde_json::json;
 use std::{env, sync::Arc};
-use env_logger::Env;
 use webrtc::util::Marshal;
 
 use gstreamer::prelude::*;
@@ -53,7 +53,25 @@ async fn whep(url: &str, offer_str: String) -> Result<String> {
     Ok(answer_str)
 }
 
-fn create_pipeline(rtpdepay: &str, decoder: &str) -> Result<(gstreamer::Pipeline,gstreamer_app::AppSrc)>{
+fn create_pipeline(
+    payload_type: u8,
+    clock_rate: u32,
+    codec: &str,
+) -> Result<(gstreamer::Pipeline, gstreamer_app::AppSrc)> {
+    let rtpdepay;
+    let decoder;
+
+    match codec {
+        "H264" => {
+            rtpdepay = "rtph264depay";
+            decoder = "avdec_h264";
+        }
+        _ => {
+            rtpdepay = "rtpvp8depay";
+            decoder = "avdec_vp8";
+        }
+    }
+
     let pipeline = gstreamer::Pipeline::new(None);
     let src = gstreamer::ElementFactory::make("appsrc").build()?;
     let rtp = gstreamer::ElementFactory::make(rtpdepay).build()?;
@@ -64,22 +82,25 @@ fn create_pipeline(rtpdepay: &str, decoder: &str) -> Result<(gstreamer::Pipeline
     pipeline.add_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
     gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
 
-    let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
+    let appsrc = configure_appsrc(src, payload_type, clock_rate, codec).unwrap();
 
     Ok((pipeline, appsrc))
 }
 
-fn create_appsrc_consumer(
+fn configure_appsrc(
+    src: gstreamer::Element,
     payload_type: u8,
-    appsrc: gstreamer_app::AppSrc,
+    clock_rate: u32,
     codec: &str,
 ) -> Result<gstreamer_app::AppSrc> {
+    let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
+
     appsrc.set_caps(Some(
         &gstreamer::Caps::builder("application/x-rtp")
             .field("media", "video")
             .field("encoding-name", codec)
             .field("payload", payload_type)
-            .field("clock-rate", 90000)
+            .field("clock-rate", clock_rate as i32)
             .build(),
     ));
     appsrc.set_format(gstreamer::Format::Time);
@@ -87,20 +108,6 @@ fn create_appsrc_consumer(
     info!("appsrc {:?}", appsrc);
 
     Ok(appsrc)
-}
-
-fn create_h264_consumer(payload_type: u8) -> Result<(gstreamer::Pipeline,gstreamer_app::AppSrc)> {
-    let (pipeline, appsrc) = create_pipeline("rtph264depay", "avdec_h264")?;
-    let appsrc = create_appsrc_consumer(payload_type, appsrc, "H264")?;
-
-    Ok((pipeline,appsrc))
-}
-
-fn create_vp8_consumer(payload_type: u8) -> Result<(gstreamer::Pipeline,gstreamer_app::AppSrc)> {
-    let (pipeline, appsrc) = create_pipeline("rtpvp8depay", "avdec_vp8")?;
-    let appsrc = create_appsrc_consumer(payload_type, appsrc, "VP8")?;
-
-    Ok((pipeline,appsrc))
 }
 
 #[tokio::main]
@@ -173,13 +180,20 @@ async fn main() -> Result<()> {
     // Set a handler for when a new remote track starts
     peer_connection.on_track(Box::new(move |track, _, _| {
         Box::pin(async move {
-            let codec = track.codec();
-            info!("codec:{}", codec.capability.mime_type);
+            let codec: RTCRtpCodecParameters = track.codec();
+            info!(
+                "payload_type:{} codec:{} clock_rate:{}",
+                track.payload_type(),
+                codec.capability.mime_type,
+                codec.capability.clock_rate
+            );
             let mime_type = codec.capability.mime_type.to_lowercase();
             if mime_type == MIME_TYPE_H264.to_lowercase() {
                 info!("Got h264 track, receiving data");
 
-                let (pipeline, appsrc) = create_h264_consumer(track.payload_type()).unwrap();
+                let (pipeline, appsrc) =
+                    create_pipeline(track.payload_type(), codec.capability.clock_rate, "H264")
+                        .unwrap();
                 let _ = pipeline.set_state(gstreamer::State::Playing);
 
                 tokio::spawn(async move {
@@ -188,7 +202,9 @@ async fn main() -> Result<()> {
             } else if mime_type == MIME_TYPE_VP8.to_lowercase() {
                 info!("Got VP8 track, receiving data");
 
-                let (pipeline, appsrc) = create_vp8_consumer(track.payload_type()).unwrap();
+                let (pipeline, appsrc) =
+                    create_pipeline(track.payload_type(), codec.capability.clock_rate, "VP8")
+                        .unwrap();
                 let _ = pipeline.set_state(gstreamer::State::Playing);
 
                 tokio::spawn(async move {
