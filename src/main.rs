@@ -53,6 +53,22 @@ async fn whep(url: &str, offer_str: String) -> Result<String> {
     Ok(answer_str)
 }
 
+fn create_pipeline(rtpdepay: &str, decoder: &str) -> Result<(gstreamer::Pipeline,gstreamer_app::AppSrc)>{
+    let pipeline = gstreamer::Pipeline::new(None);
+    let src = gstreamer::ElementFactory::make("appsrc").build()?;
+    let rtp = gstreamer::ElementFactory::make(rtpdepay).build()?;
+    let decode = gstreamer::ElementFactory::make(decoder).build()?;
+    let videoconvert = gstreamer::ElementFactory::make("videoconvert").build()?;
+    let sink = gstreamer::ElementFactory::make("autovideosink").build()?;
+
+    pipeline.add_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
+    gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
+
+    let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
+
+    Ok((pipeline, appsrc))
+}
+
 fn create_appsrc_consumer(
     payload_type: u8,
     appsrc: gstreamer_app::AppSrc,
@@ -73,44 +89,18 @@ fn create_appsrc_consumer(
     Ok(appsrc)
 }
 
-fn create_h264_consumer(payload_type: u8) -> Result<gstreamer_app::AppSrc> {
-    let pipeline = gstreamer::Pipeline::new(None);
-    let src = gstreamer::ElementFactory::make("appsrc").build()?;
-    let rtp = gstreamer::ElementFactory::make("rtph264depay").build()?;
-    let decode = gstreamer::ElementFactory::make("avdec_h264").build()?;
-    let videoconvert = gstreamer::ElementFactory::make("videoconvert").build()?;
-    let sink = gstreamer::ElementFactory::make("autovideosink").build()?;
-
-    pipeline.add_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
-    gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
-
-    let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
+fn create_h264_consumer(payload_type: u8) -> Result<(gstreamer::Pipeline,gstreamer_app::AppSrc)> {
+    let (pipeline, appsrc) = create_pipeline("rtph264depay", "avdec_h264")?;
     let appsrc = create_appsrc_consumer(payload_type, appsrc, "H264")?;
 
-    // start pipeline
-    let _ = pipeline.set_state(gstreamer::State::Playing);
-
-    Ok(appsrc)
+    Ok((pipeline,appsrc))
 }
 
-fn create_vp8_consumer(payload_type: u8) -> Result<gstreamer_app::AppSrc> {
-    let pipeline = gstreamer::Pipeline::new(None);
-    let src = gstreamer::ElementFactory::make("appsrc").build()?;
-    let rtp = gstreamer::ElementFactory::make("rtpvp8depay").build()?;
-    let decode = gstreamer::ElementFactory::make("avdec_vp8").build()?;
-    let videoconvert = gstreamer::ElementFactory::make("videoconvert").build()?;
-    let sink = gstreamer::ElementFactory::make("autovideosink").build()?;
-
-    pipeline.add_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
-    gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
-
-    let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
+fn create_vp8_consumer(payload_type: u8) -> Result<(gstreamer::Pipeline,gstreamer_app::AppSrc)> {
+    let (pipeline, appsrc) = create_pipeline("rtpvp8depay", "avdec_vp8")?;
     let appsrc = create_appsrc_consumer(payload_type, appsrc, "VP8")?;
 
-    // start pipeline
-    let _ = pipeline.set_state(gstreamer::State::Playing);
-
-    Ok(appsrc)
+    Ok((pipeline,appsrc))
 }
 
 #[tokio::main]
@@ -189,7 +179,8 @@ async fn main() -> Result<()> {
             if mime_type == MIME_TYPE_H264.to_lowercase() {
                 info!("Got h264 track, receiving data");
 
-                let appsrc = create_h264_consumer(payload_type).unwrap();
+                let (pipeline, appsrc) = create_h264_consumer(track.payload_type()).unwrap();
+                let _ = pipeline.set_state(gstreamer::State::Playing);
 
                 tokio::spawn(async move {
                     let _ = handle_data(&appsrc, track).await;
@@ -197,7 +188,8 @@ async fn main() -> Result<()> {
             } else if mime_type == MIME_TYPE_VP8.to_lowercase() {
                 info!("Got VP8 track, receiving data");
 
-                let appsrc = create_vp8_consumer(payload_type).unwrap();
+                let (pipeline, appsrc) = create_vp8_consumer(track.payload_type()).unwrap();
+                let _ = pipeline.set_state(gstreamer::State::Playing);
 
                 tokio::spawn(async move {
                     let _ = handle_data(&appsrc, track).await;
