@@ -17,13 +17,13 @@ use log::*;
 
 use webrtc::track::track_remote::TrackRemote;
 
-pub async fn whep(url: &str, offer_str: String) -> Result<String> {
-    info!("Offer:{offer_str}");
+pub async fn whep(url: &str, offer_sdp: String) -> Result<String> {
+    info!("Offer:{offer_sdp}");
     let client = reqwest::Client::new();
-    let response = client.post(url).body(offer_str).send().await?;
-    let answer_str = response.text().await?;
-    info!("Answer:{answer_str}");
-    Ok(answer_str)
+    let response = client.post(url).body(offer_sdp).send().await?;
+    let answer_sdp = response.text().await?;
+    info!("Answer:{answer_sdp}");
+    Ok(answer_sdp)
 }
 
 pub fn create_processing(payload_type: u8, clock_rate: u32, codec: &str, track: Arc<TrackRemote>) {

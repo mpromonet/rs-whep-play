@@ -9,7 +9,6 @@
 
 use anyhow::Result;
 use env_logger::Env;
-use serde_json::json;
 use std::{env, sync::Arc};
 
 use log::*;
@@ -125,19 +124,17 @@ async fn main() -> Result<()> {
 
     // Create offer
     let offer = peer_connection.create_offer(None).await?;
-    let offer_str = serde_json::to_string(&offer.sdp)?;
 
     // Set local SessionDescription
-    peer_connection.set_local_description(offer).await?;
+    peer_connection.set_local_description(offer.clone()).await?;
 
     // Wait ICE Gathering is complete
     let mut gather_complete = peer_connection.gathering_complete_promise().await;
     let _ = gather_complete.recv().await;
 
     // WHEP call
-    let answer_str = utils::whep(url, offer_str).await?;
-    let desc = json!({ "type": "answer", "sdp": answer_str }).to_string();
-    let answer = serde_json::from_str::<RTCSessionDescription>(&desc)?;
+    let answer_str = utils::whep(url, offer.sdp).await?;
+    let answer = RTCSessionDescription::answer(answer_str)?;
 
     // Set remote SessionDescription
     peer_connection.set_remote_description(answer).await?;
