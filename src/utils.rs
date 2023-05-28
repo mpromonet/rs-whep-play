@@ -70,7 +70,9 @@ fn create_pipeline(
             rtpdepay = "rtpvp8depay";
             decoder = "avdec_vp8";
         }
-        _ => unimplemented!("codec:{codec} not managed");
+        _ => {
+            unimplemented!("codec:{codec} not managed");
+        }
     }
 
     let pipeline = gstreamer::Pipeline::new(None);
