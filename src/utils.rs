@@ -56,22 +56,25 @@ async fn handle_data(appsrc: &gstreamer_app::AppSrc, track: Arc<TrackRemote>) ->
 fn create_pipeline(
     payload_type: u8,
     clock_rate: u32,
-    codec: &str,
+    mimetype: &str,
 ) -> Result<(gstreamer::Pipeline, gstreamer_app::AppSrc)> {
     let rtpdepay;
     let decoder;
+    let codec;
 
-    match codec {
-        "H264" => {
+    match mimetype {
+        "video/H264" => {
             rtpdepay = "rtph264depay";
             decoder = "avdec_h264";
+            codec = "H264";
         }
-        "VP8" => {
+        "video/VP8" => {
             rtpdepay = "rtpvp8depay";
             decoder = "avdec_vp8";
+            codec = "VP8";
         }
         _ => {
-            unimplemented!("codec:{codec} not managed");
+            unimplemented!("mimetype:{mimetype} not managed");
         }
     }
 
@@ -85,7 +88,7 @@ fn create_pipeline(
     pipeline.add_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
     gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
 
-    let appsrc = configure_appsrc(src, payload_type, clock_rate, codec).unwrap();
+    let appsrc = configure_appsrc(src, payload_type, clock_rate, codec)?;
 
     Ok((pipeline, appsrc))
 }

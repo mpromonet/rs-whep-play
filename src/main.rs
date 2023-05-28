@@ -99,24 +99,12 @@ async fn main() -> Result<()> {
                 codec.capability.mime_type,
                 codec.capability.clock_rate
             );
-            let mime_type = codec.capability.mime_type.to_lowercase();
-            if mime_type == MIME_TYPE_H264.to_lowercase() {
-                info!("Got h264 track, receiving data");
-                utils::create_processing(
-                    track.payload_type(),
-                    codec.capability.clock_rate,
-                    "H264",
-                    track,
-                );
-            } else if mime_type == MIME_TYPE_VP8.to_lowercase() {
-                info!("Got VP8 track, receiving data");
-                utils::create_processing(
-                    track.payload_type(),
-                    codec.capability.clock_rate,
-                    "VP8",
-                    track,
-                );
-            }
+            utils::create_processing(
+                track.payload_type(),
+                codec.capability.clock_rate,
+                codec.capability.mime_type.as_str(),
+                track,
+            );
         })
     }));
 
