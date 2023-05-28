@@ -25,4 +25,4 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 
 COPY --from=builder /workdir/target/release/rs-whep-play .
 
-CMD ["./rs-whep-play"]
+ENTRYPOINT ["./rs-whep-play"]
