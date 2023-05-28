@@ -11,10 +11,8 @@ use anyhow::Result;
 use env_logger::Env;
 use serde_json::json;
 use std::{env, sync::Arc};
-use webrtc::util::Marshal;
 
-use gstreamer::prelude::*;
-use log::{info, trace};
+use log::*;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264, MIME_TYPE_VP8};
 use webrtc::api::APIBuilder;
 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
@@ -24,103 +22,16 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::rtp_transceiver::rtp_codec::{
     RTCRtpCodecCapability, RTCRtpCodecParameters, RTPCodecType,
 };
-use webrtc::track::track_remote::TrackRemote;
 
-async fn handle_data(appsrc: &gstreamer_app::AppSrc, track: Arc<TrackRemote>) -> Result<()> {
-    loop {
-        tokio::select! {
-            result = track.read_rtp() => {
-                if let Ok((rtp_packet, _)) = result {
-                    trace!("rtp:{rtp_packet}");
-                    let buf = rtp_packet.marshal()?;
-                    let buffer = gstreamer::Buffer::from_slice(buf);
-                    let _ = appsrc.push_buffer(buffer);
-                }else{
-                    info!("read_rtp error");
-                    return Ok(());
-                }
-            }
-        }
-    }
-}
-
-async fn whep(url: &str, offer_str: String) -> Result<String> {
-    info!("Offer:{offer_str}");
-    let client = reqwest::Client::new();
-    let response = client.post(url).body(offer_str).send().await?;
-    let answer_str = response.text().await?;
-    info!("Answer:{answer_str}");
-    Ok(answer_str)
-}
-
-fn create_pipeline(
-    payload_type: u8,
-    clock_rate: u32,
-    codec: &str,
-) -> Result<(gstreamer::Pipeline, gstreamer_app::AppSrc)> {
-    let rtpdepay;
-    let decoder;
-
-    match codec {
-        "H264" => {
-            rtpdepay = "rtph264depay";
-            decoder = "avdec_h264";
-        }
-        _ => {
-            rtpdepay = "rtpvp8depay";
-            decoder = "avdec_vp8";
-        }
-    }
-
-    let pipeline = gstreamer::Pipeline::new(None);
-    let src = gstreamer::ElementFactory::make("appsrc").build()?;
-    let rtp = gstreamer::ElementFactory::make(rtpdepay).build()?;
-    let decode = gstreamer::ElementFactory::make(decoder).build()?;
-    let videoconvert = gstreamer::ElementFactory::make("videoconvert").build()?;
-    let sink = gstreamer::ElementFactory::make("autovideosink").build()?;
-
-    pipeline.add_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
-    gstreamer::Element::link_many(&[&src, &rtp, &decode, &videoconvert, &sink])?;
-
-    let appsrc = configure_appsrc(src, payload_type, clock_rate, codec).unwrap();
-
-    Ok((pipeline, appsrc))
-}
-
-fn configure_appsrc(
-    src: gstreamer::Element,
-    payload_type: u8,
-    clock_rate: u32,
-    codec: &str,
-) -> Result<gstreamer_app::AppSrc> {
-    let appsrc = src.dynamic_cast::<gstreamer_app::AppSrc>().unwrap();
-
-    appsrc.set_caps(Some(
-        &gstreamer::Caps::builder("application/x-rtp")
-            .field("media", "video")
-            .field("encoding-name", codec)
-            .field("payload", payload_type)
-            .field("clock-rate", clock_rate as i32)
-            .build(),
-    ));
-    appsrc.set_format(gstreamer::Format::Time);
-
-    info!("appsrc {:?}", appsrc);
-
-    Ok(appsrc)
-}
+mod utils;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut url =
         "http://localhost:8000/api/whep?url=Zeeland&options=rtptransport%3dtcp%26timeout%3d60";
-    let mut payload_type = 102u8;
     let args: Vec<String> = env::args().collect();
     if args.len() > 1 {
         url = &args[1];
-    }
-    if args.len() > 2 {
-        payload_type = args[2].parse::<u8>().unwrap();
     }
 
     // init logger
@@ -151,6 +62,7 @@ async fn main() -> Result<()> {
         .add_transceiver_from_kind(RTPCodecType::Video, None)
         .await?;
 
+    let payload_type = 96u8;
     tr.set_codec_preferences(vec![
         RTCRtpCodecParameters {
             payload_type,
@@ -190,26 +102,20 @@ async fn main() -> Result<()> {
             let mime_type = codec.capability.mime_type.to_lowercase();
             if mime_type == MIME_TYPE_H264.to_lowercase() {
                 info!("Got h264 track, receiving data");
-
-                let (pipeline, appsrc) =
-                    create_pipeline(track.payload_type(), codec.capability.clock_rate, "H264")
-                        .unwrap();
-                let _ = pipeline.set_state(gstreamer::State::Playing);
-
-                tokio::spawn(async move {
-                    let _ = handle_data(&appsrc, track).await;
-                });
+                utils::create_processing(
+                    track.payload_type(),
+                    codec.capability.clock_rate,
+                    "H264",
+                    track,
+                );
             } else if mime_type == MIME_TYPE_VP8.to_lowercase() {
                 info!("Got VP8 track, receiving data");
-
-                let (pipeline, appsrc) =
-                    create_pipeline(track.payload_type(), codec.capability.clock_rate, "VP8")
-                        .unwrap();
-                let _ = pipeline.set_state(gstreamer::State::Playing);
-
-                tokio::spawn(async move {
-                    let _ = handle_data(&appsrc, track).await;
-                });
+                utils::create_processing(
+                    track.payload_type(),
+                    codec.capability.clock_rate,
+                    "VP8",
+                    track,
+                );
             }
         })
     }));
@@ -241,7 +147,7 @@ async fn main() -> Result<()> {
     let _ = gather_complete.recv().await;
 
     // WHEP call
-    let answer_str = whep(url, offer_str).await?;
+    let answer_str = utils::whep(url, offer_str).await?;
     let desc = json!({ "type": "answer", "sdp": answer_str }).to_string();
     let answer = serde_json::from_str::<RTCSessionDescription>(&desc)?;
 
