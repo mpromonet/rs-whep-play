@@ -63,6 +63,11 @@ fn create_pipeline(
     let codec;
 
     match mimetype {
+        "video/H265" => {
+            rtpdepay = "rtph265depay";
+            decoder = "avdec_h265";
+            codec = "H265";
+        }
         "video/H264" => {
             rtpdepay = "rtph264depay";
             decoder = "avdec_h264";
@@ -78,7 +83,7 @@ fn create_pipeline(
         }
     }
 
-    let pipeline = gstreamer::Pipeline::new(None);
+    let pipeline = gstreamer::Pipeline::new();
     let src = gstreamer::ElementFactory::make("appsrc").build()?;
     let rtp = gstreamer::ElementFactory::make(rtpdepay).build()?;
     let decode = gstreamer::ElementFactory::make(decoder).build()?;
