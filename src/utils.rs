@@ -78,6 +78,11 @@ fn create_pipeline(
             decoder = "avdec_vp8";
             codec = "VP8";
         }
+        "video/VP9" => {
+            rtpdepay = "rtpvp9depay";
+            decoder = "avdec_vp9";
+            codec = "VP9";
+        }
         _ => {
             unimplemented!("mimetype:{mimetype} not managed");
         }

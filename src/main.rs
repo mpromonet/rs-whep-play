@@ -12,7 +12,7 @@ use env_logger::Env;
 use std::{env, sync::Arc};
 
 use log::*;
-use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264, MIME_TYPE_VP8};
+use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264, MIME_TYPE_VP8, MIME_TYPE_VP9};
 use webrtc::api::APIBuilder;
 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -27,7 +27,7 @@ mod utils;
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut url =
-        "http://localhost:8000/api/whep?url=Zeeland&options=rtptransport%3dtcp%26timeout%3d60";
+        "http://localhost:8000/api/whep?url=Alledale&options=rtptransport%3dtcp%26timeout%3d60";
     let args: Vec<String> = env::args().collect();
     if args.len() > 1 {
         url = &args[1];
@@ -76,6 +76,17 @@ async fn main() -> Result<()> {
         },
         RTCRtpCodecParameters {
             payload_type: payload_type + 1,
+            capability: RTCRtpCodecCapability {
+                mime_type: MIME_TYPE_VP9.to_string(),
+                clock_rate: 90000,
+                channels: 0,
+                sdp_fmtp_line: "".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            ..Default::default()
+        },
+        RTCRtpCodecParameters {
+            payload_type: payload_type + 2,
             capability: RTCRtpCodecCapability {
                 mime_type: MIME_TYPE_VP8.to_string(),
                 clock_rate: 90000,
