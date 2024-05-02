@@ -7,11 +7,11 @@ license = "The Unlicense"
 keywords = ["webrtc", "whep", "gstreamer"]
 
 [dependencies]
-webrtc = "0.10"
-tokio = "1.37"
+webrtc = "0.11"
+tokio = {version = "1.37", features = ["full"]}
 anyhow = "1.0"
 reqwest = "0.11"
-gstreamer = "0.21"
-gstreamer-app = "0.21"
+gstreamer = "0.22"
+gstreamer-app = "0.22"
 log = "0.4"
 env_logger = "0.11"
