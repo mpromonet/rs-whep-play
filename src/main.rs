@@ -12,7 +12,7 @@ use env_logger::Env;
 use std::{env, sync::Arc};
 
 use log::*;
-use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264, MIME_TYPE_VP8, MIME_TYPE_VP9};
+use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_HEVC, MIME_TYPE_H264, MIME_TYPE_VP8, MIME_TYPE_VP9};
 use webrtc::api::APIBuilder;
 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -63,6 +63,17 @@ async fn main() -> Result<()> {
 
     let payload_type = 96u8;
     tr.set_codec_preferences(vec![
+        RTCRtpCodecParameters {
+            payload_type,
+            capability: RTCRtpCodecCapability {
+                mime_type: MIME_TYPE_HEVC.to_string(),
+                clock_rate: 90000,
+                channels: 0,
+                sdp_fmtp_line: "".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            ..Default::default()
+        },
         RTCRtpCodecParameters {
             payload_type,
             capability: RTCRtpCodecCapability {

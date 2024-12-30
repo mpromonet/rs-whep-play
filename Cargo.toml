@@ -8,10 +8,10 @@ keywords = ["webrtc", "whep", "gstreamer"]
 
 [dependencies]
 webrtc = "0.12"
-tokio = {version = "1.37", features = ["full"]}
+tokio = {version = "1.42", features = ["full"]}
 anyhow = "1.0"
-reqwest = "0.11"
-gstreamer = "0.22"
-gstreamer-app = "0.22"
+reqwest = "0.12"
+gstreamer = "0.23"
+gstreamer-app = "0.23"
 log = "0.4"
 env_logger = "0.11"
